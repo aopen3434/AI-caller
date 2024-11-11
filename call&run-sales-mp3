@@ -1,0 +1,116 @@
+#Integrating MP3 playback, SIP trunk, and text-to-speech (TTS) in a Python script for an automated dialing system requires multiple technologies, such as:
+#1.SIP handling: Libraries like pjsua (PJSIP) for interacting with SIP trunks.
+#2.MP3 playback: Use pydub or other audio libraries to play MP3 files.
+#3.Speech recognition: Libraries like SpeechRecognition to detect keywords like "hello" or a beep.
+#4.Text-to-Speech (TTS): Libraries like pyttsx3 or Google TTS for synthesizing the sales pitch.
+#Before you start, ensure you have the following installed:
+#pjsua for SIP trunk interaction.
+#SpeechRecognition for voice recognition.
+#pydub for MP3 playback.
+#pyttsx3 for Text-to-Speech.
+#Here’s a basic structure for your script:
+#python
+#Copy code:
+
+import pjsua2 as pj
+import speech_recognition as sr
+import pyttsx3
+import time
+from pydub import AudioSegment
+from pydub.playback import play
+
+# Initialize Text-to-Speech
+tts_engine = pyttsx3.init()
+
+# Initialize Speech Recognition
+recognizer = sr.Recognizer()
+
+# SIP setup
+def log_cb(level, msg, length):
+    print(msg)
+
+class MyAccountCallback(pj.AccountCallback):
+    def __init__(self, account=None):
+        pj.AccountCallback.__init__(self, account)
+
+    def on_incoming_call(self, call):
+        call_cb = MyCallCallback(call)
+        call.set_callback(call_cb)
+        call.answer(180)  # Ring and then pick up after 2 rings
+        time.sleep(6)
+        call.answer(200)  # Answer the call
+        tts_engine.say("Hello, how can I assist you today?")
+        tts_engine.runAndWait()
+
+class MyCallCallback(pj.CallCallback):
+    def __init__(self, call=None):
+        pj.CallCallback.__init__(self, call)
+    
+    def on_state(self):
+        print("Call is ", self.call.info().state_text)
+    
+    def on_media_state(self):
+        if self.call.info().media_state == pj.MediaState.ACTIVE:
+            print("Call is active")
+
+# Function to play MP3 file
+def play_mp3(file_path):
+    sound = AudioSegment.from_mp3(file_path)
+    play(sound)
+
+# Function to detect "hello" or beep
+def detect_audio():
+    with sr.Microphone() as source:
+        audio = recognizer.listen(source)
+        try:
+            speech_text = recognizer.recognize_google(audio)
+            if "hello" in speech_text.lower():
+                return "hello"
+        except sr.UnknownValueError:
+            print("Listening for beep...")
+            if audio.frame_data.find(b"\xFF\xEE") >= 0:  # Simplified beep detection
+                return "beep"
+        return None
+
+# Function to read numbers from file
+def read_phone_numbers(file_path):
+    with open(file_path, "r") as f:
+        numbers = [line.strip() for line in f.readlines()]
+    return numbers
+
+# Main function to dial numbers and handle logic
+def dial_numbers():
+    phone_numbers = read_phone_numbers("~/phone.txt")
+    
+    # Initialize SIP
+    lib = pj.Lib()
+    lib.init(log_cfg=pj.LogConfig(level=3, callback=log_cb))
+    
+    transport = lib.create_transport(pj.TransportType.UDP, pj.TransportConfig(5060))
+    lib.start()
+
+    acc_cfg = pj.AccountConfig(domain="your_sip_provider.com", username="your_username", password="your_password")
+    acc = lib.create_account(acc_cfg)
+    
+    acc_cb = MyAccountCallback(acc)
+    acc.set_callback(acc_cb)
+
+    for number in phone_numbers:
+        call = acc.make_call(f"sip:{number}@your_sip_provider.com", MyCallCallback())
+        time.sleep(2)  # Wait for connection
+
+        result = detect_audio()
+        if result == "hello":
+            tts_engine.say("This is your sales pitch: Input#2.")
+            tts_engine.runAndWait()
+        elif result == "beep":
+            play_mp3("C:/U.mp3")
+
+        call.hangup()
+        time.sleep(2)  # Pause before next call
+
+    lib.destroy()
+    lib = None
+
+if __name__ == "__main__":
+    dial_numbers()
